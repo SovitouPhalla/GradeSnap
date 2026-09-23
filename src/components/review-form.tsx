@@ -345,6 +345,7 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
                 onClick={() =>
                   updateAnswer(answer.id, {
                     final_score: clampScore(answer.final_score - 1, answer.maxPoints),
+                    scoreInput: String(clampScore(answer.final_score - 1, answer.maxPoints)),
                     reviewed: answer.needs_review ? false : true,
                   })
                 }
@@ -377,6 +378,7 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
                 onClick={() =>
                   updateAnswer(answer.id, {
                     final_score: clampScore(answer.final_score + 1, answer.maxPoints),
+                    scoreInput: String(clampScore(answer.final_score + 1, answer.maxPoints)),
                     reviewed: answer.needs_review ? false : true,
                   })
                 }

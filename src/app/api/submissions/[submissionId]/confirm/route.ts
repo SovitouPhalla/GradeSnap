@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, requireTeacher } from "@/lib/auth";
+import { confirmSubmissionReview } from "@/lib/confirm-submission";
 import { getServiceSupabase } from "@/lib/supabase/server";
 
 export async function POST(
@@ -23,26 +24,21 @@ export async function POST(
       return NextResponse.json({ message: "answers are required." }, { status: 400 });
     }
 
-    const supabase = getServiceSupabase();
-    const { data, error } = await supabase.rpc("confirm_submission_review", {
-      actor_teacher_id: teacher.id,
-      answer_updates: body.answers,
-      target_student_name: body.studentName?.trim() || null,
-      target_submission_id: submissionId,
+    const result = await confirmSubmissionReview({
+      supabase: getServiceSupabase(),
+      teacherId: teacher.id,
+      submissionId,
+      payload: {
+        studentName: body.studentName,
+        answers: body.answers,
+      },
     });
 
-    if (error) {
-      const message = error.message || "Failed to confirm paper.";
-      const status =
-        /not found/i.test(message)
-          ? 404
-          : /must be included|must be reviewed|out of date/i.test(message)
-            ? 400
-            : 500;
-      return NextResponse.json({ message }, { status });
+    if (!result.ok) {
+      return NextResponse.json({ message: result.message }, { status: result.status });
     }
 
-    return NextResponse.json({ message: "Paper confirmed.", totalFinalScore: data });
+    return NextResponse.json({ message: "Paper confirmed.", totalFinalScore: result.totalFinalScore });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ message: error.message }, { status: error.status });

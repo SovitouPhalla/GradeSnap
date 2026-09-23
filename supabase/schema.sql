@@ -285,6 +285,7 @@ $$;
 
 
 create or replace function public.create_submission_with_answers(
+  actor_teacher_id uuid,
   target_exam_id uuid,
   target_student_name text,
   target_image_path text,
@@ -307,7 +308,8 @@ begin
 
   select teacher_id into submission_teacher_id
   from public.exams
-  where id = target_exam_id;
+  where id = target_exam_id
+    and teacher_id = actor_teacher_id;
 
   if submission_teacher_id is null then
     raise exception 'Exam not found.';
@@ -364,6 +366,6 @@ $$;
 
 revoke all on function public.confirm_submission_review(uuid, uuid, text, jsonb) from public, anon, authenticated;
 grant execute on function public.confirm_submission_review(uuid, uuid, text, jsonb) to service_role;
-revoke all on function public.create_submission_with_answers(uuid, text, text, text, numeric, jsonb) from public, anon, authenticated;
-grant execute on function public.create_submission_with_answers(uuid, text, text, text, numeric, jsonb) to service_role;
+revoke all on function public.create_submission_with_answers(uuid, uuid, text, text, text, numeric, jsonb) from public, anon, authenticated;
+grant execute on function public.create_submission_with_answers(uuid, uuid, text, text, text, numeric, jsonb) to service_role;
 grant execute on function public.create_exam_with_questions(text, jsonb) to authenticated;

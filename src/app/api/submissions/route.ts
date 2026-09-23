@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
     const { data: submissionId, error: submissionError } = await supabase.rpc(
       "create_submission_with_answers",
       {
+        actor_teacher_id: teacher.id,
         answer_rows: answerRows,
         target_exam_id: examId,
         target_image_path: storagePath,

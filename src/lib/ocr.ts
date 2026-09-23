@@ -78,7 +78,5 @@ export async function extractTextWithVision(imageBase64: string, questionCount: 
   };
   const rawText = payload.responses?.[0]?.fullTextAnnotation?.text?.trim() ?? "";
 
-  console.info("GradeSnap OCR raw output", rawText);
-
   return mapAnswersFromText(rawText, questionCount);
 }
