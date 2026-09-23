@@ -1,0 +1,4 @@
+project_id = "gradesnap"
+
+[functions.process-submission]
+verify_jwt = true
