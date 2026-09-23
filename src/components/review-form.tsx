@@ -278,6 +278,22 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
           </div>
           <div className="mt-4 space-y-3">
             <p className="text-sm font-medium text-slate-700">Final score</p>
+            <label className="block space-y-2 text-sm font-medium text-slate-700">
+              <span>Precise score override</span>
+              <input
+                max={answer.maxPoints}
+                min={0}
+                onChange={(event) =>
+                  updateAnswer(answer.id, {
+                    final_score: clampScore(Number(event.target.value), answer.maxPoints),
+                    reviewed: answer.needs_review ? false : true,
+                  })
+                }
+                step={0.5}
+                type="number"
+                value={answer.final_score}
+              />
+            </label>
             <div className="flex flex-wrap items-center gap-3">
               <button
                 className="secondary-button"

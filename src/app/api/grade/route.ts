@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/auth";
 import { gradeSubmission } from "@/lib/grading";
 import type { OCRResult, QuestionRecord } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
+    await requireTeacher(request);
     const body = (await request.json()) as { questions?: QuestionRecord[]; ocrResult?: OCRResult };
 
     if (!body.questions || !body.ocrResult) {

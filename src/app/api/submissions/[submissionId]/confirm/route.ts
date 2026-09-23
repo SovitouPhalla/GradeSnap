@@ -87,6 +87,7 @@ export async function POST(
           student_response: answer.studentResponse,
           final_score: clampScore(Number(answer.finalScore), maxPoints),
           teacher_confirmed: true,
+          needs_review: answer.reviewed ? false : existing.needs_review,
         })
         .eq("id", answer.id)
         .eq("submission_id", submissionId);

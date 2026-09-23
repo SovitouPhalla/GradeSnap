@@ -1,32 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/auth";
-import { gradeSubmission } from "@/lib/grading";
-import { extractTextWithVision } from "@/lib/ocr";
 import { getServiceSupabase } from "@/lib/supabase/server";
-import type { OCRResult, QuestionRecord } from "@/lib/types";
+import { processSubmissionForReview } from "@/lib/submission";
+import type { QuestionRecord } from "@/lib/types";
 
 async function toBase64(file: File) {
   const arrayBuffer = await file.arrayBuffer();
   return Buffer.from(arrayBuffer).toString("base64");
-}
-
-async function runOcrWithFallback(imageBase64: string, questionCount: number): Promise<OCRResult> {
-  try {
-    return await extractTextWithVision(imageBase64, questionCount);
-  } catch {
-    try {
-      return await extractTextWithVision(imageBase64, questionCount);
-    } catch {
-      return {
-        studentName: null,
-        rawText: "",
-        answers: Array.from({ length: questionCount }, (_, index) => ({
-          questionNumber: index + 1,
-          response: "",
-        })),
-      };
-    }
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -81,8 +61,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: uploadError.message }, { status: 500 });
     }
 
-    const ocrResult = await runOcrWithFallback(await toBase64(file), questions.length);
-    const suggestions = await gradeSubmission(questions as QuestionRecord[], ocrResult);
+    const { ocrResult, suggestions } = await processSubmissionForReview({
+      imageBase64: await toBase64(file),
+      questions: questions as QuestionRecord[],
+    });
 
     const { data: submission, error: submissionError } = await supabase
       .from("submissions")
