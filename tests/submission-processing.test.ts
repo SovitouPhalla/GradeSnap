@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { processSubmissionForReview } from "@/lib/submission";
+import { processSubmissionForReview, runOcrWithFallback } from "@/lib/submission";
 import type { QuestionRecord } from "@/lib/types";
 
 const questions: QuestionRecord[] = [
@@ -23,6 +23,35 @@ const questions: QuestionRecord[] = [
     max_points: 2,
   },
 ];
+
+test("runOcrWithFallback returns the recovered OCR result on the retry", async () => {
+  let attempts = 0;
+
+  const result = await runOcrWithFallback({
+    imageBase64: "fake-image",
+    questionCount: 2,
+    extractText: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("temporary OCR failure");
+      }
+
+      return {
+        studentName: "Ada Lovelace",
+        rawText: "Ada Lovelace\n1. A\n2. Mars",
+        answers: [
+          { questionNumber: 1, response: "A" },
+          { questionNumber: 2, response: "Mars" },
+        ],
+      };
+    },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.studentName, "Ada Lovelace");
+  assert.equal(result.rawText, "Ada Lovelace\n1. A\n2. Mars");
+  assert.deepEqual(result.answers.map((answer) => answer.response), ["A", "Mars"]);
+});
 
 test("processSubmissionForReview falls back to blank OCR answers after two OCR failures", async () => {
   let attempts = 0;

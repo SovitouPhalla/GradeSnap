@@ -19,7 +19,7 @@ GradeSnap is a mobile-first Next.js PWA for capturing paper exams, extracting an
 
 2. Copy `.env.example` to `.env.local` and fill in the values.
 3. Run the Supabase SQL in `supabase/schema.sql`.
-4. Create a private Supabase storage bucket named `submission-images` if it does not already exist.
+4. The schema also creates the private `submission-images` bucket if it does not already exist.
 5. Start the app:
 
    ```bash

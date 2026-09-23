@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
     const { error: answerError } = await supabase.from("submission_answers").insert(answerRows);
 
     if (answerError) {
+      await supabase.from("submissions").delete().eq("id", submission.id).eq("teacher_id", teacher.id);
       return NextResponse.json({ message: answerError.message }, { status: 500 });
     }
 

@@ -41,7 +41,7 @@ create table if not exists public.questions (
   type text not null check (type in ('mcq', 'short_answer')),
   correct_option text,
   rubric text,
-  max_points numeric(6,2) not null check (max_points >= 0),
+  max_points integer not null check (max_points >= 0),
   created_at timestamptz not null default now(),
   unique (exam_id, order_index)
 );

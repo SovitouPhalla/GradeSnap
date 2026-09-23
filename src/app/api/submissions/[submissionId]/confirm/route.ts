@@ -65,6 +65,13 @@ export async function POST(
       (existingAnswersResponse.data ?? []).map((answer) => [answer.id, answer]),
     );
 
+    if (body.answers.length !== answerLookup.size) {
+      return NextResponse.json(
+        { message: "Every stored answer must be included when confirming a paper." },
+        { status: 400 },
+      );
+    }
+
     for (const answer of body.answers) {
       const existing = answerLookup.get(answer.id);
       if (!existing) {
