@@ -260,6 +260,10 @@ begin
     raise exception 'At least one question is required.';
   end if;
 
+  if not exists (select 1 from public.teachers where id = auth.uid()) then
+    raise exception 'Teacher profile not found.';
+  end if;
+
   insert into public.exams (teacher_id, title)
   values (auth.uid(), target_title)
   returning id into new_exam_id;
@@ -299,6 +303,12 @@ declare
 begin
   if jsonb_typeof(answer_rows) <> 'array' or jsonb_array_length(answer_rows) = 0 then
     raise exception 'At least one answer row is required.';
+  end if;
+
+  if not exists (
+    select 1 from public.exams where id = target_exam_id and teacher_id = actor_teacher_id
+  ) then
+    raise exception 'Exam not found.';
   end if;
 
   insert into public.submissions (

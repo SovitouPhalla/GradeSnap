@@ -18,6 +18,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!file.type.startsWith("image/")) {
+      return NextResponse.json({ message: "Only image uploads are supported." }, { status: 400 });
+    }
+
     const supabase = getServiceSupabase();
     const { data: exam, error: examError } = await supabase
       .from("exams")
