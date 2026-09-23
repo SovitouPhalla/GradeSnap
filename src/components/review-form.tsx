@@ -37,6 +37,18 @@ type AnswerRow = {
   teacher_confirmed: boolean;
 };
 
+function buildQuickPickScores(maxPoints: number) {
+  const scores = new Set<number>();
+
+  for (let score = 0; score <= maxPoints + 0.001; score += 0.5) {
+    scores.add(Number(score.toFixed(2)));
+  }
+
+  scores.add(Number(maxPoints.toFixed(2)));
+
+  return Array.from(scores).sort((left, right) => left - right);
+}
+
 type ReviewState = AnswerRow & {
   prompt: string;
   questionType: "mcq" | "short_answer";
@@ -308,8 +320,7 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
                 −
               </button>
               <div className="flex flex-wrap gap-2">
-                {Array.from({ length: Math.max(1, answer.maxPoints) }, (_, scoreIndex) => scoreIndex).map(
-                  (scoreValue) => (
+                {buildQuickPickScores(answer.maxPoints).map((scoreValue) => (
                     <button
                       className={`secondary-button ${
                         Number(answer.final_score) === scoreValue ? "border-blue-500 text-blue-700" : ""
@@ -325,22 +336,7 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
                     >
                       {scoreValue}
                     </button>
-                  ),
-                )}
-                <button
-                  className={`secondary-button ${
-                    Number(answer.final_score) === answer.maxPoints ? "border-blue-500 text-blue-700" : ""
-                  }`}
-                  onClick={() =>
-                    updateAnswer(answer.id, {
-                      final_score: answer.maxPoints,
-                      reviewed: answer.needs_review ? false : true,
-                    })
-                  }
-                  type="button"
-                >
-                  {answer.maxPoints}
-                </button>
+                  ))}
               </div>
               <button
                 className="secondary-button"

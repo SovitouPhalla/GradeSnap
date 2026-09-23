@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { SetupBanner } from "@/components/setup-banner";
 import { hasSupabasePublicEnv } from "@/lib/env";
@@ -24,6 +24,7 @@ type ExamDetail = {
 
 export function ScanForm({ examId }: { examId: string }) {
   const router = useRouter();
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const supabase = useMemo(() => getBrowserSupabase(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [exam, setExam] = useState<ExamDetail | null>(null);
@@ -83,6 +84,13 @@ export function ScanForm({ examId }: { examId: string }) {
       }
     };
   }, [previewUrl]);
+
+  const clearFile = () => {
+    setFile(null);
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  };
 
   const submitPaper = async () => {
     if (!session) {
@@ -151,9 +159,16 @@ export function ScanForm({ examId }: { examId: string }) {
           accept="image/*"
           capture="environment"
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          ref={inputRef}
           type="file"
         />
       </label>
+
+      {file ? (
+        <button className="secondary-button" onClick={clearFile} type="button">
+          Remove selected image
+        </button>
+      ) : null}
 
       {previewUrl ? (
         <div className="space-y-3">

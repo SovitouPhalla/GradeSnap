@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireTeacher } from "@/lib/auth";
+import { AuthError, requireTeacher } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { processSubmissionForReview } from "@/lib/submission";
 import type { QuestionRecord } from "@/lib/types";
@@ -115,6 +115,10 @@ export async function POST(request: NextRequest) {
           : "Submission created with manual review fallbacks where needed.",
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
+
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Failed to process paper." },
       { status: 500 },

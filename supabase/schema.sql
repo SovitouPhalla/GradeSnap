@@ -152,3 +152,89 @@ with check (
 insert into storage.buckets (id, name, public)
 values ('submission-images', 'submission-images', false)
 on conflict (id) do nothing;
+
+
+create or replace function public.confirm_submission_review(
+  target_submission_id uuid,
+  actor_teacher_id uuid,
+  target_student_name text,
+  answer_updates jsonb
+)
+returns numeric
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  expected_count integer;
+  item jsonb;
+  answer_id uuid;
+  reviewed boolean;
+  total_score numeric(8,2);
+begin
+  select count(*) into expected_count
+  from public.submission_answers sa
+  join public.submissions s on s.id = sa.submission_id
+  where sa.submission_id = target_submission_id
+    and s.teacher_id = actor_teacher_id;
+
+  if expected_count = 0 then
+    raise exception 'Submission not found.';
+  end if;
+
+  if jsonb_typeof(answer_updates) <> 'array' or jsonb_array_length(answer_updates) <> expected_count then
+    raise exception 'Every stored answer must be included when confirming a paper.';
+  end if;
+
+  for item in select * from jsonb_array_elements(answer_updates)
+  loop
+    answer_id := (item ->> 'id')::uuid;
+    reviewed := coalesce((item ->> 'reviewed')::boolean, false);
+
+    update public.submission_answers sa
+    set student_response = coalesce(item ->> 'studentResponse', ''),
+        final_score = greatest(0, least(coalesce((item ->> 'finalScore')::numeric, 0), q.max_points)),
+        teacher_confirmed = true,
+        needs_review = case when reviewed then false else sa.needs_review end
+    from public.questions q,
+         public.submissions s
+    where sa.id = answer_id
+      and sa.question_id = q.id
+      and sa.submission_id = target_submission_id
+      and s.id = sa.submission_id
+      and s.teacher_id = actor_teacher_id
+      and (not sa.needs_review or reviewed);
+
+    if not found then
+      raise exception 'Every flagged answer must be reviewed before confirmation.';
+    end if;
+  end loop;
+
+  select coalesce(sum(final_score), 0) into total_score
+  from public.submission_answers
+  where submission_id = target_submission_id;
+
+  update public.submissions
+  set student_name = nullif(trim(coalesce(target_student_name, '')), ''),
+      review_status = 'confirmed',
+      reviewed_at = now(),
+      total_final_score = total_score
+  where id = target_submission_id
+    and teacher_id = actor_teacher_id;
+
+  return total_score;
+end;
+$$;
+
+
+create policy if not exists "teachers access own submission images"
+on storage.objects
+for all to authenticated
+using (
+  bucket_id = 'submission-images'
+  and (storage.foldername(name))[1] = auth.uid()::text
+)
+with check (
+  bucket_id = 'submission-images'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);

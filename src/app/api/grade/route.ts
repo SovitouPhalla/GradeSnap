@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireTeacher } from "@/lib/auth";
+import { AuthError, requireTeacher } from "@/lib/auth";
 import { gradeSubmission } from "@/lib/grading";
 import type { OCRResult, QuestionRecord } from "@/lib/types";
 
@@ -18,6 +18,10 @@ export async function POST(request: NextRequest) {
     const suggestions = await gradeSubmission(body.questions, body.ocrResult);
     return NextResponse.json({ suggestions });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
+
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Grading failed." },
       { status: 503 },

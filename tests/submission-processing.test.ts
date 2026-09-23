@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { processSubmissionForReview, runOcrWithFallback } from "@/lib/submission";
-import type { QuestionRecord } from "@/lib/types";
+import type { OCRResult, QuestionRecord } from "@/lib/types";
 
 const questions: QuestionRecord[] = [
   {
@@ -51,6 +51,42 @@ test("runOcrWithFallback returns the recovered OCR result on the retry", async (
   assert.equal(result.studentName, "Ada Lovelace");
   assert.equal(result.rawText, "Ada Lovelace\n1. A\n2. Mars");
   assert.deepEqual(result.answers.map((answer) => answer.response), ["A", "Mars"]);
+});
+
+test("processSubmissionForReview passes successful OCR output through to grading", async () => {
+  const ocrResult: OCRResult = {
+    studentName: "Grace Hopper",
+    rawText: "Grace Hopper\n1. A",
+    answers: [{ questionNumber: 1, response: "A" }],
+  };
+  let gradedOcr: OCRResult | null = null;
+
+  const result = await processSubmissionForReview({
+    imageBase64: "fake-image",
+    questions: questions.slice(0, 1),
+    extractText: async () => ocrResult,
+    grade: async (_questions, nextOcrResult) => {
+      gradedOcr = nextOcrResult;
+      return [
+        {
+          questionId: "q1",
+          questionNumber: 1,
+          score: 1,
+          confidence: "high",
+          note: "Matched option A.",
+          autoAccepted: true,
+          needsReview: false,
+          studentResponse: nextOcrResult.answers[0]?.response ?? "",
+          questionType: "mcq",
+          maxPoints: 1,
+        },
+      ];
+    },
+  });
+
+  assert.equal(result.ocrResult.studentName, "Grace Hopper");
+  assert.equal(gradedOcr, ocrResult);
+  assert.equal(result.suggestions[0]?.studentResponse, "A");
 });
 
 test("processSubmissionForReview falls back to blank OCR answers after two OCR failures", async () => {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireTeacher } from "@/lib/auth";
+import { AuthError, requireTeacher } from "@/lib/auth";
 import { extractTextWithVision } from "@/lib/ocr";
 
 export async function POST(request: NextRequest) {
@@ -17,6 +17,10 @@ export async function POST(request: NextRequest) {
     const result = await extractTextWithVision(body.imageBase64, body.questionCount);
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
+
     return NextResponse.json(
       {
         message: error instanceof Error ? error.message : "OCR failed.",
