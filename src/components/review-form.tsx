@@ -362,6 +362,7 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
                       onClick={() =>
                         updateAnswer(answer.id, {
                           final_score: scoreValue,
+                          scoreInput: String(scoreValue),
                           reviewed: answer.needs_review ? false : true,
                         })
                       }

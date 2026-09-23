@@ -91,6 +91,9 @@ Return JSON only.`,
 export async function gradeSubmission(
   questions: QuestionRecord[],
   ocrResult: OCRResult,
+  options?: {
+    shortAnswerGrader?: typeof gradeShortAnswer;
+  },
 ): Promise<GradeSuggestion[]> {
   return Promise.all(
     questions.map(async (question, index) => {
@@ -118,8 +121,9 @@ export async function gradeSubmission(
       }
 
       try {
+        const shortAnswerGrader = options?.shortAnswerGrader ?? gradeShortAnswer;
         const result = await retryOnce(() =>
-          gradeShortAnswer({
+          shortAnswerGrader({
             prompt: question.prompt,
             rubric: question.rubric ?? "",
             maxPoints: Number(question.max_points),

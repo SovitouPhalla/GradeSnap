@@ -285,7 +285,6 @@ $$;
 
 
 create or replace function public.create_submission_with_answers(
-  actor_teacher_id uuid,
   target_exam_id uuid,
   target_student_name text,
   target_image_path text,
@@ -300,14 +299,17 @@ set search_path = public
 as $$
 declare
   new_submission_id uuid;
+  submission_teacher_id uuid;
 begin
   if jsonb_typeof(answer_rows) <> 'array' or jsonb_array_length(answer_rows) = 0 then
     raise exception 'At least one answer row is required.';
   end if;
 
-  if not exists (
-    select 1 from public.exams where id = target_exam_id and teacher_id = actor_teacher_id
-  ) then
+  select teacher_id into submission_teacher_id
+  from public.exams
+  where id = target_exam_id;
+
+  if submission_teacher_id is null then
     raise exception 'Exam not found.';
   end if;
 
@@ -321,7 +323,7 @@ begin
     total_ai_score
   ) values (
     target_exam_id,
-    actor_teacher_id,
+    submission_teacher_id,
     target_student_name,
     target_image_path,
     coalesce(target_raw_ocr_text, ''),
@@ -362,6 +364,6 @@ $$;
 
 revoke all on function public.confirm_submission_review(uuid, uuid, text, jsonb) from public, anon, authenticated;
 grant execute on function public.confirm_submission_review(uuid, uuid, text, jsonb) to service_role;
-revoke all on function public.create_submission_with_answers(uuid, uuid, text, text, text, numeric, jsonb) from public, anon, authenticated;
-grant execute on function public.create_submission_with_answers(uuid, uuid, text, text, text, numeric, jsonb) to service_role;
+revoke all on function public.create_submission_with_answers(uuid, text, text, text, numeric, jsonb) from public, anon, authenticated;
+grant execute on function public.create_submission_with_answers(uuid, text, text, text, numeric, jsonb) to service_role;
 grant execute on function public.create_exam_with_questions(text, jsonb) to authenticated;
