@@ -238,3 +238,120 @@ with check (
   bucket_id = 'submission-images'
   and (storage.foldername(name))[1] = auth.uid()::text
 );
+
+
+create or replace function public.create_exam_with_questions(
+  target_title text,
+  question_rows jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_exam_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required.';
+  end if;
+
+  if jsonb_typeof(question_rows) <> 'array' or jsonb_array_length(question_rows) = 0 then
+    raise exception 'At least one question is required.';
+  end if;
+
+  insert into public.exams (teacher_id, title)
+  values (auth.uid(), target_title)
+  returning id into new_exam_id;
+
+  insert into public.questions (exam_id, order_index, prompt, type, correct_option, rubric, max_points)
+  select
+    new_exam_id,
+    (question_row ->> 'order_index')::integer,
+    question_row ->> 'prompt',
+    question_row ->> 'type',
+    nullif(question_row ->> 'correct_option', ''),
+    nullif(question_row ->> 'rubric', ''),
+    (question_row ->> 'max_points')::integer
+  from jsonb_array_elements(question_rows) as question_row;
+
+  return new_exam_id;
+end;
+$$;
+
+
+create or replace function public.create_submission_with_answers(
+  actor_teacher_id uuid,
+  target_exam_id uuid,
+  target_student_name text,
+  target_image_path text,
+  target_raw_ocr_text text,
+  target_total_ai_score numeric,
+  answer_rows jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_submission_id uuid;
+begin
+  if jsonb_typeof(answer_rows) <> 'array' or jsonb_array_length(answer_rows) = 0 then
+    raise exception 'At least one answer row is required.';
+  end if;
+
+  insert into public.submissions (
+    exam_id,
+    teacher_id,
+    student_name,
+    image_path,
+    raw_ocr_text,
+    review_status,
+    total_ai_score
+  ) values (
+    target_exam_id,
+    actor_teacher_id,
+    target_student_name,
+    target_image_path,
+    coalesce(target_raw_ocr_text, ''),
+    'pending',
+    target_total_ai_score
+  )
+  returning id into new_submission_id;
+
+  insert into public.submission_answers (
+    submission_id,
+    question_id,
+    question_number,
+    student_response,
+    ai_score,
+    final_score,
+    confidence,
+    note,
+    needs_review,
+    teacher_confirmed
+  )
+  select
+    new_submission_id,
+    (answer_row ->> 'question_id')::uuid,
+    (answer_row ->> 'question_number')::integer,
+    coalesce(answer_row ->> 'student_response', ''),
+    coalesce((answer_row ->> 'ai_score')::numeric, 0),
+    coalesce((answer_row ->> 'final_score')::numeric, 0),
+    answer_row ->> 'confidence',
+    coalesce(answer_row ->> 'note', ''),
+    coalesce((answer_row ->> 'needs_review')::boolean, true),
+    coalesce((answer_row ->> 'teacher_confirmed')::boolean, false)
+  from jsonb_array_elements(answer_rows) as answer_row;
+
+  return new_submission_id;
+end;
+$$;
+
+
+revoke all on function public.confirm_submission_review(uuid, uuid, text, jsonb) from public, anon, authenticated;
+grant execute on function public.confirm_submission_review(uuid, uuid, text, jsonb) to service_role;
+revoke all on function public.create_submission_with_answers(uuid, uuid, text, text, text, numeric, jsonb) from public, anon, authenticated;
+grant execute on function public.create_submission_with_answers(uuid, uuid, text, text, text, numeric, jsonb) to service_role;
+grant execute on function public.create_exam_with_questions(text, jsonb) to authenticated;

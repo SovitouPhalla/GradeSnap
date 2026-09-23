@@ -54,6 +54,7 @@ type ReviewState = AnswerRow & {
   questionType: "mcq" | "short_answer";
   maxPoints: number;
   reviewed: boolean;
+  scoreInput: string;
 };
 
 export function ReviewForm({ submissionId }: { submissionId: string }) {
@@ -143,6 +144,7 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
           questionType: question?.type ?? "short_answer",
           maxPoints: Number(question?.max_points ?? answer.final_score ?? 1),
           reviewed: answer.needs_review ? answer.teacher_confirmed : true,
+          scoreInput: String(answer.final_score),
         } satisfies ReviewState;
       });
 
@@ -295,15 +297,46 @@ export function ReviewForm({ submissionId }: { submissionId: string }) {
               <input
                 max={answer.maxPoints}
                 min={0}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  if (nextValue === "") {
+                    updateAnswer(answer.id, { scoreInput: nextValue, reviewed: answer.needs_review ? false : true });
+                    return;
+                  }
+
+                  const parsedValue = Number(nextValue);
+                  if (Number.isNaN(parsedValue)) {
+                    updateAnswer(answer.id, { scoreInput: nextValue });
+                    return;
+                  }
+
                   updateAnswer(answer.id, {
-                    final_score: clampScore(Number(event.target.value), answer.maxPoints),
+                    scoreInput: nextValue,
+                    final_score: clampScore(parsedValue, answer.maxPoints),
                     reviewed: answer.needs_review ? false : true,
-                  })
-                }
+                  });
+                }}
+                onBlur={() => {
+                  if (answer.scoreInput === "") {
+                    updateAnswer(answer.id, { scoreInput: String(answer.final_score) });
+                    return;
+                  }
+
+                  const parsedValue = Number(answer.scoreInput);
+                  if (Number.isNaN(parsedValue)) {
+                    updateAnswer(answer.id, { scoreInput: String(answer.final_score) });
+                    return;
+                  }
+
+                  const clampedValue = clampScore(parsedValue, answer.maxPoints);
+                  updateAnswer(answer.id, {
+                    final_score: clampedValue,
+                    scoreInput: String(clampedValue),
+                  });
+                }}
                 step={0.5}
                 type="number"
-                value={answer.final_score}
+                value={answer.scoreInput}
               />
             </label>
             <div className="flex flex-wrap items-center gap-3">

@@ -64,20 +64,7 @@ export function ExamCreateForm() {
     setError(null);
     setMessage(null);
 
-    const { data: exam, error: examError } = await supabase
-      .from("exams")
-      .insert({ teacher_id: session.user.id, title })
-      .select("id")
-      .single();
-
-    if (examError || !exam) {
-      setSaving(false);
-      setError(examError?.message ?? "Failed to create exam.");
-      return;
-    }
-
-    const rows = questions.map((question, index) => ({
-      exam_id: exam.id,
+    const questionRows = questions.map((question, index) => ({
       order_index: index + 1,
       prompt: question.prompt,
       type: question.type,
@@ -86,16 +73,20 @@ export function ExamCreateForm() {
       max_points: question.maxPoints,
     }));
 
-    const { error: questionsError } = await supabase.from("questions").insert(rows);
+    const { data: examId, error: examError } = await supabase.rpc("create_exam_with_questions", {
+      question_rows: questionRows,
+      target_title: title,
+    });
+
     setSaving(false);
 
-    if (questionsError) {
-      setError(questionsError.message);
+    if (examError || !examId) {
+      setError(examError?.message ?? "Failed to create exam.");
       return;
     }
 
     setMessage("Exam created. Redirecting to scan flow…");
-    router.push(`/exams/${exam.id}/scan`);
+    router.push(`/exams/${examId}/scan`);
   };
 
   if (!hasSupabasePublicEnv()) {
