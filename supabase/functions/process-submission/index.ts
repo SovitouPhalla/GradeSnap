@@ -15,6 +15,17 @@ interface ProcessRequestBody {
   imagePath: string
 }
 
+// Spreading a multi-megabyte Uint8Array into String.fromCharCode(...) overflows
+// the call stack, so build the binary string in chunks instead.
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
 Deno.serve(async (req) => {
   const corsResponse = handleCors(req)
   if (corsResponse) return corsResponse
@@ -39,7 +50,7 @@ Deno.serve(async (req) => {
     if (downloadError) throw downloadError
 
     const imageBuffer = new Uint8Array(await imageBlob.arrayBuffer())
-    const base64Image = btoa(String.fromCharCode(...imageBuffer))
+    const base64Image = bytesToBase64(imageBuffer)
     const mimeType = imageBlob.type || 'image/jpeg'
 
     let geminiResult: GeminiResult | null = null
