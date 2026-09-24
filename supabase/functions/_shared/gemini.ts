@@ -4,7 +4,7 @@
 // subject-matter knowledge. A mandatory human review step in the app is what
 // keeps this safe, not a deterministic check against a key.
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
-const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash'
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-flash-latest'
 
 export interface GeminiQuestionResult {
   questionNumber: number
@@ -92,7 +92,8 @@ export async function callGemini(imageBase64: string, mimeType: string): Promise
     throw new Error('Gemini API rate limit reached (free tier). Please try again shortly.')
   }
   if (!response.ok) {
-    throw new Error(`Gemini API HTTP ${response.status}`)
+    const bodyText = await response.text()
+    throw new Error(`Gemini API HTTP ${response.status}: ${bodyText.slice(0, 1500)}`)
   }
 
   const data = await response.json()
