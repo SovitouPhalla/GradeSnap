@@ -12,7 +12,7 @@ answer key or rubric to author up front.
 
 - **Frontend:** React + Vite (PWA via `vite-plugin-pwa`), React Router, mobile-first CSS (min 375px).
 - **Backend:** Supabase — Postgres (exams/submissions/submission_items), Auth (email/password), Storage (captured exam photos), Edge Functions (Deno).
-- **OCR + grading:** Google Gemini API (free tier, `gemini-2.0-flash` by default), called only from the single `process-submission` edge function. One multimodal request reads the photographed paper, identifies each question and the student's answer, and grades every question — MCQ or short-answer — using its own knowledge. There is no deterministic answer-key comparison; every score is the model's judgment, which is why the human review step is mandatory.
+- **OCR + grading:** Google Gemini API (free tier, `gemini-2.5-flash` by default), called only from the single `process-submission` edge function. One multimodal request reads the photographed paper, identifies each question and the student's answer, and grades every question — MCQ or short-answer — using its own knowledge. There is no deterministic answer-key comparison; every score is the model's judgment, which is why the human review step is mandatory.
 - **Client-side throttling:** requests to `process-submission` are queued and rate-limited in the browser (see `src/lib/geminiThrottle.ts`) to stay under Gemini's free-tier RPM/RPD limits when scanning a stack of papers.
 
 ## Project layout

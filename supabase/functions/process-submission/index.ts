@@ -55,15 +55,17 @@ Deno.serve(async (req) => {
 
     let geminiResult: GeminiResult | null = null
     let status: 'graded' | 'error' = 'graded'
+    let geminiErrorMessage: string | null = null
     try {
       geminiResult = await withRetryOnce(() => callGemini(base64Image, mimeType))
     } catch (geminiError) {
       console.error('Gemini call failed after retry:', geminiError)
       status = 'error'
+      geminiErrorMessage = geminiError instanceof Error ? geminiError.message : String(geminiError)
     }
 
-    // Always log the raw model output for debugging, per spec.
-    console.log('Gemini result for', imagePath, ':', JSON.stringify(geminiResult))
+    // Always log the raw model output (or the failure reason) for debugging.
+    console.log('Gemini result for', imagePath, ':', JSON.stringify(geminiResult ?? geminiErrorMessage))
 
     const { data: submission, error: insertError } = await supabase
       .from('submissions')
@@ -71,7 +73,7 @@ Deno.serve(async (req) => {
         exam_id: examId,
         image_path: imagePath,
         student_name: geminiResult?.studentName ?? null,
-        raw_ocr_text: geminiResult ? JSON.stringify(geminiResult) : null,
+        raw_ocr_text: geminiResult ? JSON.stringify(geminiResult) : geminiErrorMessage,
         status,
       })
       .select()
