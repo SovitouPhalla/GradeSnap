@@ -1,6 +1,6 @@
 import { supabase } from '../supabaseClient'
 import { throttledGeminiCall } from './geminiThrottle'
-import type { Exam, Question, Submission, SubmissionScore } from '../types'
+import type { Exam, Submission, SubmissionItem } from '../types'
 
 export async function listExams(): Promise<Exam[]> {
   const { data, error } = await supabase.from('exams').select('*').order('created_at', { ascending: false })
@@ -27,25 +27,6 @@ export async function createExam(title: string): Promise<Exam> {
   return data as Exam
 }
 
-export async function listQuestions(examId: string): Promise<Question[]> {
-  const { data, error } = await supabase
-    .from('questions')
-    .select('*')
-    .eq('exam_id', examId)
-    .order('question_number', { ascending: true })
-  if (error) throw error
-  return data as Question[]
-}
-
-export type NewQuestion = Omit<Question, 'id' | 'exam_id' | 'created_at'>
-
-export async function createQuestions(examId: string, questions: NewQuestion[]): Promise<Question[]> {
-  const rows = questions.map((q) => ({ ...q, exam_id: examId }))
-  const { data, error } = await supabase.from('questions').insert(rows).select()
-  if (error) throw error
-  return data as Question[]
-}
-
 export async function listSubmissions(examId: string): Promise<Submission[]> {
   const { data, error } = await supabase
     .from('submissions')
@@ -62,23 +43,24 @@ export async function getSubmission(submissionId: string): Promise<Submission> {
   return data as Submission
 }
 
-export async function listSubmissionScores(submissionId: string): Promise<SubmissionScore[]> {
+export async function listSubmissionItems(submissionId: string): Promise<SubmissionItem[]> {
   const { data, error } = await supabase
-    .from('submission_scores')
+    .from('submission_items')
     .select('*')
     .eq('submission_id', submissionId)
+    .order('question_number', { ascending: true })
   if (error) throw error
-  return data as SubmissionScore[]
+  return data as SubmissionItem[]
 }
 
-export async function listScoresForSubmissions(submissionIds: string[]): Promise<SubmissionScore[]> {
+export async function listItemsForSubmissions(submissionIds: string[]): Promise<SubmissionItem[]> {
   if (submissionIds.length === 0) return []
   const { data, error } = await supabase
-    .from('submission_scores')
+    .from('submission_items')
     .select('*')
     .in('submission_id', submissionIds)
   if (error) throw error
-  return data as SubmissionScore[]
+  return data as SubmissionItem[]
 }
 
 export async function uploadExamImage(examId: string, file: Blob): Promise<string> {
@@ -91,10 +73,10 @@ export async function uploadExamImage(examId: string, file: Blob): Promise<strin
 }
 
 /** Calls the server-side process-submission edge function: a single Gemini
- * multimodal request does OCR + short-answer grading (MCQ is graded
- * deterministically server-side). Never touches the Gemini API key on the
- * client, and is throttled client-side to stay under Gemini's free-tier
- * rate limits. */
+ * multimodal request reads the page, identifies every question on it, and
+ * grades each answer with its own subject knowledge (no answer key). Never
+ * touches the Gemini API key on the client, and is throttled client-side to
+ * stay under Gemini's free-tier rate limits. */
 export async function processSubmission(examId: string, imagePath: string): Promise<{ submissionId: string }> {
   return throttledGeminiCall(async () => {
     const { data, error } = await supabase.functions.invoke('process-submission', {
@@ -105,22 +87,18 @@ export async function processSubmission(examId: string, imagePath: string): Prom
   })
 }
 
-export interface ScoreUpdate {
-  questionId: string
+export interface ItemUpdate {
+  itemId: string
   finalScore: number
 }
 
-export async function confirmSubmissionScores(
-  submissionId: string,
-  updates: ScoreUpdate[],
-): Promise<void> {
+export async function confirmSubmissionItems(submissionId: string, updates: ItemUpdate[]): Promise<void> {
   const now = new Date().toISOString()
   for (const update of updates) {
     const { error } = await supabase
-      .from('submission_scores')
+      .from('submission_items')
       .update({ final_score: update.finalScore, confirmed: true, confirmed_at: now })
-      .eq('submission_id', submissionId)
-      .eq('question_id', update.questionId)
+      .eq('id', update.itemId)
     if (error) throw error
   }
   const { error: statusError } = await supabase

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getExam, listQuestions, listSubmissions } from '../lib/api'
-import type { Exam, Question, Submission } from '../types'
+import { getExam, listSubmissions } from '../lib/api'
+import type { Exam, Submission } from '../types'
 
 const STATUS_LABEL: Record<Submission['status'], string> = {
   pending: 'Pending',
@@ -13,17 +13,15 @@ const STATUS_LABEL: Record<Submission['status'], string> = {
 export function ExamDetailPage() {
   const { examId } = useParams<{ examId: string }>()
   const [exam, setExam] = useState<Exam | null>(null)
-  const [questions, setQuestions] = useState<Question[]>([])
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!examId) return
-    Promise.all([getExam(examId), listQuestions(examId), listSubmissions(examId)])
-      .then(([e, q, s]) => {
+    Promise.all([getExam(examId), listSubmissions(examId)])
+      .then(([e, s]) => {
         setExam(e)
-        setQuestions(q)
         setSubmissions(s)
       })
       .catch((err) => setError(err.message))
@@ -37,7 +35,6 @@ export function ExamDetailPage() {
   return (
     <div className="page">
       <h1>{exam.title}</h1>
-      <p className="subtitle">{questions.length} question(s)</p>
 
       <div className="button-row">
         <Link to={`/exams/${examId}/scan`} className="btn-primary">

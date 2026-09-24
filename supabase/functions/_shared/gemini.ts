@@ -1,24 +1,17 @@
 // Calls Google's Gemini API (multimodal) to do OCR + grading in a single
-// request: it reads the exam photo, extracts the student name and each
-// question's answer, and — for short-answer questions only — grades that
-// answer against the supplied rubric. MCQ questions are never graded by
-// Gemini; only their extracted answer text is used, and scoring against the
-// answer key happens deterministically in code (see mcqGrading.ts).
+// request. There is no teacher-authored answer key: Gemini identifies every
+// question on the page itself and grades each answer using its own
+// subject-matter knowledge. A mandatory human review step in the app is what
+// keeps this safe, not a deterministic check against a key.
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
 const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.0-flash'
 
-export interface QuestionForPrompt {
+export interface GeminiQuestionResult {
   questionNumber: number
-  type: 'mcq' | 'short_answer'
-  prompt: string
-  options: Array<{ label: string; text: string }> | null
-  rubric: string | null
-  maxPoints: number
-}
-
-export interface GeminiAnswer {
-  questionNumber: number
+  questionType: 'mcq' | 'short_answer'
+  prompt: string | null
   extractedAnswer: string | null
+  maxPoints: number
   score: number | null
   confidence: 'high' | 'low' | null
   note: string | null
@@ -26,66 +19,52 @@ export interface GeminiAnswer {
 
 export interface GeminiResult {
   studentName: string | null
-  answers: GeminiAnswer[]
+  questions: GeminiQuestionResult[]
 }
 
-function buildPrompt(questions: QuestionForPrompt[]): string {
-  const questionBlocks = questions
-    .map((q) => {
-      if (q.type === 'mcq') {
-        const options = (q.options ?? []).map((o) => `${o.label}) ${o.text}`).join('\n')
-        return `Question ${q.questionNumber} (multiple choice, ${q.maxPoints} pts):\n${q.prompt}\n${options}\nFor this question, only transcribe the option letter the student selected. Do not grade it.`
-      }
-      return `Question ${q.questionNumber} (short answer, ${q.maxPoints} pts max):\n${q.prompt}\nRubric / model answer: ${q.rubric ?? ''}\nTranscribe the student's answer, then grade it against the rubric.`
-    })
-    .join('\n\n')
-
-  return `You are grading a scanned paper exam for a teacher. The image shows one student's handwritten or printed exam paper.
+const PROMPT = `You are grading a scanned paper exam/worksheet for a teacher. The image shows one student's handwritten or printed paper. No answer key is provided — use your own subject-matter knowledge to judge correctness and assign scores.
 
 Step 1: If a student name is visible (usually handwritten at the top), read it. Otherwise return null.
-Step 2: For each question listed below, find and transcribe the student's answer as written on the page.
-Step 3: For short-answer questions only, grade the transcribed answer against the given rubric/model answer. Award a score from 0 up to the question's max points. Set confidence to "high" only if you are confident the transcription is accurate and the grade is clear-cut; otherwise use "low". Include a one-sentence note explaining the score. Do NOT grade multiple-choice questions — leave score/confidence/note null for them.
-
-Questions:
-
-${questionBlocks}
+Step 2: Identify every question on the page, in order. For each one, read the question text as printed/written, and transcribe the student's answer as written.
+Step 3: Decide whether each question is multiple-choice ("mcq", lettered options given) or open-ended ("short_answer").
+Step 4: Decide reasonable max points per question: use the paper's own point notation if visible (e.g. "(2 pts)"); otherwise default to 1 point for simple/factual questions and up to 3-5 for questions that clearly expect a fuller written response.
+Step 5: Grade the transcribed answer. For multiple choice, award full credit only if you can determine the selected option is correct. For open-ended questions with no single correct answer (opinions, creative writing, brainstorming), grade on effort, completeness, and whether the instructions were followed, not on matching one "right" answer.
+Step 6: Set confidence to "high" only when you are confident in both the transcription and the grade; otherwise "low". Always include a one-sentence note explaining the score.
 
 Respond with ONLY a JSON object matching this shape, no markdown fences or extra commentary:
 {
   "studentName": string | null,
-  "answers": [
-    { "questionNumber": number, "extractedAnswer": string | null, "score": number | null, "confidence": "high" | "low" | null, "note": string | null }
+  "questions": [
+    { "questionNumber": number, "questionType": "mcq" | "short_answer", "prompt": string | null, "extractedAnswer": string | null, "maxPoints": number, "score": number | null, "confidence": "high" | "low" | null, "note": string | null }
   ]
 }`
-}
 
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
     studentName: { type: 'STRING', nullable: true },
-    answers: {
+    questions: {
       type: 'ARRAY',
       items: {
         type: 'OBJECT',
         properties: {
           questionNumber: { type: 'INTEGER' },
+          questionType: { type: 'STRING' },
+          prompt: { type: 'STRING', nullable: true },
           extractedAnswer: { type: 'STRING', nullable: true },
+          maxPoints: { type: 'NUMBER' },
           score: { type: 'NUMBER', nullable: true },
           confidence: { type: 'STRING', nullable: true },
           note: { type: 'STRING', nullable: true },
         },
-        required: ['questionNumber'],
+        required: ['questionNumber', 'questionType', 'maxPoints'],
       },
     },
   },
-  required: ['answers'],
+  required: ['questions'],
 }
 
-export async function callGemini(
-  imageBase64: string,
-  mimeType: string,
-  questions: QuestionForPrompt[],
-): Promise<GeminiResult> {
+export async function callGemini(imageBase64: string, mimeType: string): Promise<GeminiResult> {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not configured')
   }
@@ -98,7 +77,7 @@ export async function callGemini(
       body: JSON.stringify({
         contents: [
           {
-            parts: [{ text: buildPrompt(questions) }, { inlineData: { mimeType, data: imageBase64 } }],
+            parts: [{ text: PROMPT }, { inlineData: { mimeType, data: imageBase64 } }],
           },
         ],
         generationConfig: {
@@ -132,20 +111,28 @@ export async function callGemini(
 }
 
 function validateGeminiResult(raw: unknown): GeminiResult {
-  if (typeof raw !== 'object' || raw === null || !Array.isArray((raw as Record<string, unknown>).answers)) {
-    throw new Error('Gemini response missing "answers" array')
+  if (typeof raw !== 'object' || raw === null || !Array.isArray((raw as Record<string, unknown>).questions)) {
+    throw new Error('Gemini response missing "questions" array')
   }
   const obj = raw as Record<string, unknown>
   const studentName = typeof obj.studentName === 'string' ? obj.studentName : null
-  const answers: GeminiAnswer[] = (obj.answers as unknown[]).map((a) => {
-    const entry = (a ?? {}) as Record<string, unknown>
+  const questions: GeminiQuestionResult[] = (obj.questions as unknown[]).map((q) => {
+    const entry = (q ?? {}) as Record<string, unknown>
+    const maxPoints =
+      typeof entry.maxPoints === 'number' && Number.isFinite(entry.maxPoints) && entry.maxPoints > 0
+        ? entry.maxPoints
+        : 1
+    const rawScore = typeof entry.score === 'number' && !Number.isNaN(entry.score) ? entry.score : null
     return {
       questionNumber: typeof entry.questionNumber === 'number' ? entry.questionNumber : -1,
+      questionType: entry.questionType === 'mcq' ? 'mcq' : 'short_answer',
+      prompt: typeof entry.prompt === 'string' ? entry.prompt : null,
       extractedAnswer: typeof entry.extractedAnswer === 'string' ? entry.extractedAnswer : null,
-      score: typeof entry.score === 'number' && !Number.isNaN(entry.score) ? entry.score : null,
+      maxPoints,
+      score: rawScore == null ? null : Math.min(Math.max(rawScore, 0), maxPoints),
       confidence: entry.confidence === 'high' || entry.confidence === 'low' ? entry.confidence : null,
       note: typeof entry.note === 'string' ? entry.note : null,
     }
   })
-  return { studentName, answers }
+  return { studentName, questions }
 }

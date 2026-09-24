@@ -1,13 +1,10 @@
 // Supabase Edge Function: process-submission.
-// Single combined OCR + grading step, per the Gemini-based stack: one
-// multimodal request reads the photographed exam paper AND grades any
-// short-answer questions against their rubric. MCQ questions are still
-// graded deterministically in code against the answer key — Gemini only
-// supplies the transcribed answer text for those, never the verdict.
+// Single combined OCR + grading step: one multimodal Gemini request reads the
+// photographed paper, identifies every question on it, and grades each answer
+// using its own subject knowledge — there is no teacher-authored answer key.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders, handleCors } from '../_shared/cors.ts'
-import { gradeMcq } from '../_shared/mcqGrading.ts'
-import { callGemini, type GeminiResult, type QuestionForPrompt } from '../_shared/gemini.ts'
+import { callGemini, type GeminiResult } from '../_shared/gemini.ts'
 import { withRetryOnce } from '../_shared/retry.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -16,22 +13,6 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
 interface ProcessRequestBody {
   examId: string
   imagePath: string
-}
-
-interface QuestionRow {
-  id: string
-  question_number: number
-  type: 'mcq' | 'short_answer'
-  prompt: string
-  options: Array<{ label: string; text: string }> | null
-  correct_option: string | null
-  rubric: string | null
-  max_points: number
-}
-
-function clampScore(score: number | null, maxPoints: number): number {
-  if (score == null) return 0
-  return Math.min(Math.max(score, 0), maxPoints)
 }
 
 Deno.serve(async (req) => {
@@ -52,14 +33,6 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { data: questions, error: questionsError } = await supabase
-      .from('questions')
-      .select('*')
-      .eq('exam_id', examId)
-      .order('question_number', { ascending: true })
-    if (questionsError) throw questionsError
-    const questionRows = (questions ?? []) as QuestionRow[]
-
     const { data: imageBlob, error: downloadError } = await supabase.storage
       .from('exam-scans')
       .download(imagePath)
@@ -69,19 +42,10 @@ Deno.serve(async (req) => {
     const base64Image = btoa(String.fromCharCode(...imageBuffer))
     const mimeType = imageBlob.type || 'image/jpeg'
 
-    const questionsForPrompt: QuestionForPrompt[] = questionRows.map((q) => ({
-      questionNumber: q.question_number,
-      type: q.type,
-      prompt: q.prompt,
-      options: q.options,
-      rubric: q.rubric,
-      maxPoints: q.max_points,
-    }))
-
     let geminiResult: GeminiResult | null = null
     let status: 'graded' | 'error' = 'graded'
     try {
-      geminiResult = await withRetryOnce(() => callGemini(base64Image, mimeType, questionsForPrompt))
+      geminiResult = await withRetryOnce(() => callGemini(base64Image, mimeType))
     } catch (geminiError) {
       console.error('Gemini call failed after retry:', geminiError)
       status = 'error'
@@ -90,11 +54,6 @@ Deno.serve(async (req) => {
     // Always log the raw model output for debugging, per spec.
     console.log('Gemini result for', imagePath, ':', JSON.stringify(geminiResult))
 
-    const ocrAnswers: Record<string, string> = {}
-    for (const answer of geminiResult?.answers ?? []) {
-      if (answer.extractedAnswer) ocrAnswers[String(answer.questionNumber)] = answer.extractedAnswer
-    }
-
     const { data: submission, error: insertError } = await supabase
       .from('submissions')
       .insert({
@@ -102,58 +61,28 @@ Deno.serve(async (req) => {
         image_path: imagePath,
         student_name: geminiResult?.studentName ?? null,
         raw_ocr_text: geminiResult ? JSON.stringify(geminiResult) : null,
-        ocr_answers: ocrAnswers,
         status,
       })
       .select()
       .single()
     if (insertError) throw insertError
 
-    for (const question of questionRows) {
-      const geminiAnswer = geminiResult?.answers.find((a) => a.questionNumber === question.question_number)
-      const extractedAnswer = geminiAnswer?.extractedAnswer ?? null
-
-      let row: {
-        submission_id: string
-        question_id: string
-        ai_score: number | null
-        ai_confidence: 'high' | 'low' | null
-        ai_note: string | null
+    if (geminiResult) {
+      const itemRows = geminiResult.questions.map((q) => ({
+        submission_id: submission.id,
+        question_number: q.questionNumber,
+        question_type: q.questionType,
+        prompt: q.prompt,
+        extracted_answer: q.extractedAnswer,
+        max_points: q.maxPoints,
+        ai_score: q.score,
+        ai_confidence: q.confidence,
+        ai_note: q.note,
+      }))
+      if (itemRows.length > 0) {
+        const { error: itemsError } = await supabase.from('submission_items').insert(itemRows)
+        if (itemsError) throw itemsError
       }
-
-      if (!geminiResult) {
-        row = {
-          submission_id: submission.id,
-          question_id: question.id,
-          ai_score: null,
-          ai_confidence: 'low',
-          ai_note: 'AI grading failed — enter this score manually.',
-        }
-      } else if (question.type === 'mcq') {
-        const result = gradeMcq(question, extractedAnswer)
-        row = {
-          submission_id: submission.id,
-          question_id: question.id,
-          ai_score: result.score,
-          ai_confidence: 'high',
-          ai_note: result.isCorrect
-            ? `Matched answer key option "${question.correct_option}".`
-            : `Selected "${result.normalizedAnswer ?? 'no answer detected'}"; answer key is "${question.correct_option}".`,
-        }
-      } else {
-        row = {
-          submission_id: submission.id,
-          question_id: question.id,
-          ai_score: geminiAnswer ? clampScore(geminiAnswer.score, question.max_points) : null,
-          ai_confidence: geminiAnswer?.confidence ?? 'low',
-          ai_note: geminiAnswer?.note ?? 'AI grading unavailable for this question — enter manually.',
-        }
-      }
-
-      const { error: upsertError } = await supabase
-        .from('submission_scores')
-        .upsert(row, { onConflict: 'submission_id,question_id' })
-      if (upsertError) throw upsertError
     }
 
     return new Response(JSON.stringify({ submissionId: submission.id }), {

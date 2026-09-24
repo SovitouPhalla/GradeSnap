@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { confirmSubmissionScores, getSubmission, listQuestions, listSubmissionScores } from '../lib/api'
+import { confirmSubmissionItems, getSubmission, listSubmissionItems } from '../lib/api'
 import { requiresTeacherReview } from '../lib/grading'
 import { supabase } from '../supabaseClient'
-import type { Question, Submission, SubmissionScore } from '../types'
+import type { Submission, SubmissionItem } from '../types'
 
 interface Row {
-  question: Question
-  score: SubmissionScore | undefined
+  item: SubmissionItem
   currentValue: number
   confirmed: boolean
 }
@@ -23,19 +22,17 @@ export function ReviewPage() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!examId || !submissionId) return
-    Promise.all([getSubmission(submissionId), listQuestions(examId), listSubmissionScores(submissionId)])
-      .then(([sub, questions, scores]) => {
+    if (!submissionId) return
+    Promise.all([getSubmission(submissionId), listSubmissionItems(submissionId)])
+      .then(([sub, items]) => {
         setSubmission(sub)
         setStudentName(sub.student_name ?? '')
-        const built: Row[] = questions.map((q) => {
-          const score = scores.find((s) => s.question_id === q.id)
-          const confidence = score?.ai_confidence ?? 'low'
-          const autoAccept = score?.ai_score != null && !requiresTeacherReview(q.type, confidence)
+        const built: Row[] = items.map((item) => {
+          const confidence = item.ai_confidence ?? 'low'
+          const autoAccept = item.ai_score != null && !requiresTeacherReview(confidence)
           return {
-            question: q,
-            score,
-            currentValue: score?.final_score ?? score?.ai_score ?? 0,
+            item,
+            currentValue: item.final_score ?? item.ai_score ?? 0,
             confirmed: autoAccept,
           }
         })
@@ -43,15 +40,15 @@ export function ReviewPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [examId, submissionId])
+  }, [submissionId])
 
-  function updateRow(questionId: string, patch: Partial<Row>) {
-    setRows((rs) => rs.map((r) => (r.question.id === questionId ? { ...r, ...patch } : r)))
+  function updateRow(itemId: string, patch: Partial<Row>) {
+    setRows((rs) => rs.map((r) => (r.item.id === itemId ? { ...r, ...patch } : r)))
   }
 
   const allConfirmed = rows.length > 0 && rows.every((r) => r.confirmed)
   const totalScore = rows.reduce((sum, r) => sum + r.currentValue, 0)
-  const maxScore = rows.reduce((sum, r) => sum + r.question.max_points, 0)
+  const maxScore = rows.reduce((sum, r) => sum + r.item.max_points, 0)
 
   async function handleSave() {
     if (!submissionId || !allConfirmed) return
@@ -61,9 +58,9 @@ export function ReviewPage() {
       if (studentName.trim() && studentName.trim() !== submission?.student_name) {
         await supabase.from('submissions').update({ student_name: studentName.trim() }).eq('id', submissionId)
       }
-      await confirmSubmissionScores(
+      await confirmSubmissionItems(
         submissionId,
-        rows.map((r) => ({ questionId: r.question.id, finalScore: r.currentValue })),
+        rows.map((r) => ({ itemId: r.item.id, finalScore: r.currentValue })),
       )
       navigate(`/exams/${examId}/results`)
     } catch (e) {
@@ -75,6 +72,21 @@ export function ReviewPage() {
 
   if (loading) return <div className="page-loading">Loading…</div>
   if (!submission) return <p className="error-text">{error ?? 'Submission not found.'}</p>
+
+  if (rows.length === 0) {
+    return (
+      <div className="page">
+        <h1>Review scores</h1>
+        <p className="error-text">
+          The AI couldn't read any questions on this paper. Retake the photo — make sure the page is well-lit,
+          in focus, and fully in frame.
+        </p>
+        <button className="btn-primary btn-block" onClick={() => navigate(`/exams/${examId}/scan`)}>
+          Retake photo
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
@@ -91,23 +103,22 @@ export function ReviewPage() {
       <div className="question-list">
         {rows.map((row) => {
           const needsReview = !row.confirmed
-          const ocrAnswer = submission.ocr_answers?.[String(row.question.question_number)] ?? '(no answer detected)'
-          const noScoreYet = row.score?.ai_score == null
+          const noScoreYet = row.item.ai_score == null
           return (
-            <div className={`card ${needsReview ? 'card-flagged' : 'card-accepted'}`} key={row.question.id}>
+            <div className={`card ${needsReview ? 'card-flagged' : 'card-accepted'}`} key={row.item.id}>
               <div className="card-header">
-                <strong>Q{row.question.question_number}</strong>
-                {row.score?.ai_confidence && (
-                  <span className={`badge badge-confidence-${row.score.ai_confidence}`}>
-                    {row.score.ai_confidence} confidence
+                <strong>Q{row.item.question_number}</strong>
+                {row.item.ai_confidence && (
+                  <span className={`badge badge-confidence-${row.item.ai_confidence}`}>
+                    {row.item.ai_confidence} confidence
                   </span>
                 )}
               </div>
-              <p>{row.question.prompt}</p>
+              <p>{row.item.prompt ?? '(question text not detected)'}</p>
               <p className="ocr-answer">
-                <em>Student wrote:</em> {ocrAnswer}
+                <em>Student wrote:</em> {row.item.extracted_answer ?? '(no answer detected)'}
               </p>
-              {row.score?.ai_note && <p className="ai-note">{row.score.ai_note}</p>}
+              {row.item.ai_note && <p className="ai-note">{row.item.ai_note}</p>}
               {noScoreYet && (
                 <p className="error-text">AI grading unavailable — enter the score manually.</p>
               )}
@@ -115,27 +126,27 @@ export function ReviewPage() {
               <div className="score-control">
                 <button
                   type="button"
-                  onClick={() => updateRow(row.question.id, { currentValue: Math.max(0, row.currentValue - 1) })}
+                  onClick={() => updateRow(row.item.id, { currentValue: Math.max(0, row.currentValue - 1) })}
                 >
                   −
                 </button>
                 <input
                   type="number"
                   min={0}
-                  max={row.question.max_points}
+                  max={row.item.max_points}
                   value={row.currentValue}
                   onChange={(e) =>
-                    updateRow(row.question.id, {
-                      currentValue: Math.min(row.question.max_points, Math.max(0, Number(e.target.value))),
+                    updateRow(row.item.id, {
+                      currentValue: Math.min(row.item.max_points, Math.max(0, Number(e.target.value))),
                     })
                   }
                 />
-                <span>/ {row.question.max_points}</span>
+                <span>/ {row.item.max_points}</span>
                 <button
                   type="button"
                   onClick={() =>
-                    updateRow(row.question.id, {
-                      currentValue: Math.min(row.question.max_points, row.currentValue + 1),
+                    updateRow(row.item.id, {
+                      currentValue: Math.min(row.item.max_points, row.currentValue + 1),
                     })
                   }
                 >
@@ -149,7 +160,7 @@ export function ReviewPage() {
                 <button
                   type="button"
                   className="btn-primary btn-block"
-                  onClick={() => updateRow(row.question.id, { confirmed: true })}
+                  onClick={() => updateRow(row.item.id, { confirmed: true })}
                 >
                   Confirm this score
                 </button>
