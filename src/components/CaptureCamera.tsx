@@ -4,6 +4,33 @@ interface CaptureCameraProps {
   onCapture: (blob: Blob) => void
 }
 
+// Native camera photos can be 10+ MB at full sensor resolution, which is far
+// more detail than OCR needs and risks hitting request-size limits on the
+// Gemini API. Downscale to a reasonable max dimension before handing it off.
+const MAX_DIMENSION = 1800
+
+async function downscaleImage(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob)
+  const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height))
+  if (scale === 1) {
+    bitmap.close()
+    return blob
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    bitmap.close()
+    return blob
+  }
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  return new Promise((resolve) => {
+    canvas.toBlob((resized) => resolve(resized ?? blob), 'image/jpeg', 0.85)
+  })
+}
+
 /**
  * Mobile camera capture. Prefers a live getUserMedia preview with a shutter
  * button; falls back to a native file input with capture="environment" for
@@ -56,12 +83,12 @@ export function CaptureCamera({ onCapture }: CaptureCameraProps) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.drawImage(video, 0, 0)
-    canvas.toBlob((blob) => blob && onCapture(blob), 'image/jpeg', 0.9)
+    canvas.toBlob((blob) => blob && void downscaleImage(blob).then(onCapture), 'image/jpeg', 0.9)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) onCapture(file)
+    if (file) void downscaleImage(file).then(onCapture)
   }
 
   return (
