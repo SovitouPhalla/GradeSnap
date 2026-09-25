@@ -29,13 +29,14 @@ Step 2: Identify every question across all pages, in order. For each one, read t
 Step 3: Decide whether each question is multiple-choice ("mcq", lettered options given) or open-ended ("short_answer").
 Step 4: Decide reasonable max points per question: use the paper's own point notation if visible (e.g. "(2 pts)"); otherwise default to 1 point for simple/factual questions and up to 3-5 for questions that clearly expect a fuller written response.
 Step 5: Grade the transcribed answer. For multiple choice, award full credit only if you can determine the selected option is correct. For open-ended questions with no single correct answer (opinions, creative writing, brainstorming), grade on effort, completeness, and whether the instructions were followed, not on matching one "right" answer.
-Step 6: Set confidence to "high" only when you are confident in both the transcription and the grade; otherwise "low". Always include a one-sentence note explaining the score.
+Step 6: "score" is REQUIRED on every question and must always be a plain number between 0 and that question's maxPoints — never null and never omitted. If the student left the question blank, wrote something illegible, or answered incorrectly, still output a number (usually 0), not null. Only extractedAnswer may be null (when nothing is written at all).
+Step 7: Set confidence to "high" only when you are confident in both the transcription and the grade; otherwise "low". Always include a one-sentence note explaining the score.
 
 Respond with ONLY a JSON object matching this shape, no markdown fences or extra commentary:
 {
   "studentName": string | null,
   "questions": [
-    { "questionNumber": number, "questionType": "mcq" | "short_answer", "prompt": string | null, "extractedAnswer": string | null, "maxPoints": number, "score": number | null, "confidence": "high" | "low" | null, "note": string | null }
+    { "questionNumber": number, "questionType": "mcq" | "short_answer", "prompt": string | null, "extractedAnswer": string | null, "maxPoints": number, "score": number, "confidence": "high" | "low", "note": string }
   ]
 }`
 
@@ -53,11 +54,11 @@ const RESPONSE_SCHEMA = {
           prompt: { type: 'STRING', nullable: true },
           extractedAnswer: { type: 'STRING', nullable: true },
           maxPoints: { type: 'NUMBER' },
-          score: { type: 'NUMBER', nullable: true },
-          confidence: { type: 'STRING', nullable: true },
-          note: { type: 'STRING', nullable: true },
+          score: { type: 'NUMBER' },
+          confidence: { type: 'STRING' },
+          note: { type: 'STRING' },
         },
-        required: ['questionNumber', 'questionType', 'maxPoints'],
+        required: ['questionNumber', 'questionType', 'maxPoints', 'score', 'confidence', 'note'],
       },
     },
   },
