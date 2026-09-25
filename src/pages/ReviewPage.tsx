@@ -50,7 +50,7 @@ export function ReviewPage() {
   const totalScore = rows.reduce((sum, r) => sum + r.currentValue, 0)
   const maxScore = rows.reduce((sum, r) => sum + r.item.max_points, 0)
 
-  async function handleSave() {
+  async function handleSave(redirectTo?: string) {
     if (!submissionId || !allConfirmed) return
     setSaving(true)
     setError(null)
@@ -62,7 +62,8 @@ export function ReviewPage() {
         submissionId,
         rows.map((r) => ({ itemId: r.item.id, finalScore: r.currentValue })),
       )
-      navigate(`/exams/${examId}/results`)
+      // Default lands back on the scan screen so the teacher can go straight to the next paper.
+      navigate(redirectTo ?? `/exams/${examId}/scan`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save')
     } finally {
@@ -173,7 +174,15 @@ export function ReviewPage() {
       {error && <p className="error-text">{error}</p>}
 
       <button className="btn-primary btn-block" disabled={!allConfirmed || saving} onClick={() => void handleSave()}>
-        {saving ? 'Saving…' : allConfirmed ? 'Save final grade' : 'Confirm every flagged question to save'}
+        {saving ? 'Saving…' : allConfirmed ? 'Save & scan next student' : 'Confirm every flagged question to save'}
+      </button>
+      <button
+        type="button"
+        className="btn-link"
+        disabled={!allConfirmed || saving}
+        onClick={() => void handleSave(`/exams/${examId}/results`)}
+      >
+        Save & view results instead
       </button>
     </div>
   )
