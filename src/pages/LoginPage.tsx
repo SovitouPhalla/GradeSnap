@@ -32,7 +32,7 @@ export function LoginPage() {
 
   return (
     <div className="page auth-page">
-      <h1>GradeSnap</h1>
+      <img src="/logo.png" alt="GradeSnap" className="app-logo" />
       <p className="subtitle">Photograph exams. AI grades a first pass. You confirm every score.</p>
       <form className="form" onSubmit={handleSubmit}>
         <label>

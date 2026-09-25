@@ -35,9 +35,12 @@ export function ExamsListPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <div>
-          <h1>Your exams</h1>
-          <p className="subtitle">{user?.email}</p>
+        <div className="brand-row">
+          <img src="/pwa-192x192.png" alt="" className="brand-icon" />
+          <div>
+            <h1>Your exams</h1>
+            <p className="subtitle">{user?.email}</p>
+          </div>
         </div>
         <button className="btn-link" onClick={() => void signOut()}>
           Sign out
