@@ -73,14 +73,14 @@ export async function uploadExamImage(examId: string, file: Blob): Promise<strin
 }
 
 /** Calls the server-side process-submission edge function: a single Gemini
- * multimodal request reads the page, identifies every question on it, and
- * grades each answer with its own subject knowledge (no answer key). Never
- * touches the Gemini API key on the client, and is throttled client-side to
- * stay under Gemini's free-tier rate limits. */
-export async function processSubmission(examId: string, imagePath: string): Promise<{ submissionId: string }> {
+ * multimodal request reads the page(s), identifies every question across
+ * them, and grades each answer with its own subject knowledge (no answer
+ * key). Never touches the Gemini API key on the client, and is throttled
+ * client-side to stay under Gemini's free-tier rate limits. */
+export async function processSubmission(examId: string, imagePaths: string[]): Promise<{ submissionId: string }> {
   return throttledGeminiCall(async () => {
     const { data, error } = await supabase.functions.invoke('process-submission', {
-      body: { examId, imagePath },
+      body: { examId, imagePaths },
     })
     if (error) throw error
     return data as { submissionId: string }
@@ -106,4 +106,35 @@ export async function confirmSubmissionItems(submissionId: string, updates: Item
     .update({ status: 'confirmed', updated_at: now })
     .eq('id', submissionId)
   if (statusError) throw statusError
+}
+
+export async function deleteSubmission(submissionId: string): Promise<void> {
+  const { data: submission, error: fetchError } = await supabase
+    .from('submissions')
+    .select('image_paths')
+    .eq('id', submissionId)
+    .single()
+  if (fetchError) throw fetchError
+  const paths = (submission?.image_paths as string[] | null) ?? []
+  if (paths.length > 0) {
+    const { error: storageError } = await supabase.storage.from('exam-scans').remove(paths)
+    if (storageError) throw storageError
+  }
+  const { error } = await supabase.from('submissions').delete().eq('id', submissionId)
+  if (error) throw error
+}
+
+export async function deleteExam(examId: string): Promise<void> {
+  const { data: submissions, error: fetchError } = await supabase
+    .from('submissions')
+    .select('image_paths')
+    .eq('exam_id', examId)
+  if (fetchError) throw fetchError
+  const allPaths = (submissions ?? []).flatMap((s) => (s.image_paths as string[] | null) ?? [])
+  if (allPaths.length > 0) {
+    const { error: storageError } = await supabase.storage.from('exam-scans').remove(allPaths)
+    if (storageError) throw storageError
+  }
+  const { error } = await supabase.from('exams').delete().eq('id', examId)
+  if (error) throw error
 }

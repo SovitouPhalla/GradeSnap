@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { CaptureCamera } from '../components/CaptureCamera'
+import { ImageCropper } from '../components/ImageCropper'
 import { processSubmission, uploadExamImage } from '../lib/api'
 import { GeminiRateLimitError } from '../lib/geminiThrottle'
 
-type Step = 'capture' | 'confirm' | 'uploading' | 'error'
+type Step = 'capture' | 'crop' | 'pages' | 'uploading' | 'error'
 
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
@@ -20,27 +21,42 @@ export function ScanPage() {
   const { examId } = useParams<{ examId: string }>()
   const navigate = useNavigate()
   const [step, setStep] = useState<Step>('capture')
-  const [photo, setPhoto] = useState<Blob | null>(null)
+  const [pendingPhoto, setPendingPhoto] = useState<Blob | null>(null)
+  const [pages, setPages] = useState<Blob[]>([])
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  const photoUrl = useMemo(() => (photo ? URL.createObjectURL(photo) : null), [photo])
+  const pendingPhotoUrl = useMemo(() => (pendingPhoto ? URL.createObjectURL(pendingPhoto) : null), [pendingPhoto])
+  const pageUrls = useMemo(() => pages.map((p) => URL.createObjectURL(p)), [pages])
 
   function handleCapture(blob: Blob) {
-    setPhoto(blob)
-    setStep('confirm')
+    setPendingPhoto(blob)
+    setStep('crop')
+  }
+
+  function addPage(blob: Blob) {
+    setPages((p) => [...p, blob])
+    setPendingPhoto(null)
+    setStep('pages')
+  }
+
+  function removePage(index: number) {
+    setPages((p) => p.filter((_, i) => i !== index))
   }
 
   async function handleSubmit() {
-    if (!photo || !examId) return
+    if (pages.length === 0 || !examId) return
     setStep('uploading')
     setError(null)
     try {
-      setStatusMessage('Uploading photo…')
-      const imagePath = await withRetry(() => uploadExamImage(examId, photo))
+      setStatusMessage(pages.length > 1 ? `Uploading ${pages.length} pages…` : 'Uploading photo…')
+      const imagePaths: string[] = []
+      for (const page of pages) {
+        imagePaths.push(await withRetry(() => uploadExamImage(examId, page)))
+      }
 
       setStatusMessage('Reading and grading the paper…')
-      const { submissionId } = await processSubmission(examId, imagePath)
+      const { submissionId } = await processSubmission(examId, imagePaths)
 
       navigate(`/exams/${examId}/submissions/${submissionId}/review`)
     } catch (e) {
@@ -49,7 +65,7 @@ export function ScanPage() {
       } else {
         setError(
           e instanceof Error
-            ? `${e.message}. You can retake the photo, or continue and enter answers manually on the review screen.`
+            ? `${e.message}. You can retake the photos, or continue and enter answers manually on the review screen.`
             : 'Something went wrong.',
         )
       }
@@ -61,25 +77,82 @@ export function ScanPage() {
     <div className="page">
       <h1>Scan paper</h1>
 
-      {step === 'capture' && <CaptureCamera onCapture={handleCapture} />}
-
-      {(step === 'confirm' || step === 'error') && photoUrl && (
+      {step === 'capture' && (
         <>
-          <img src={photoUrl} alt="Captured exam paper" className="photo-preview" />
+          {pages.length > 0 && <p className="subtitle">{pages.length} page(s) added so far.</p>}
+          <CaptureCamera onCapture={handleCapture} />
+          {pages.length > 0 && (
+            <button type="button" className="btn-secondary btn-block" onClick={() => setStep('pages')}>
+              Back to pages
+            </button>
+          )}
+        </>
+      )}
+
+      {step === 'crop' && pendingPhotoUrl && (
+        <ImageCropper
+          imageUrl={pendingPhotoUrl}
+          onDone={addPage}
+          onSkip={() => pendingPhoto && addPage(pendingPhoto)}
+        />
+      )}
+
+      {step === 'pages' && (
+        <>
+          <p className="subtitle">
+            {pages.length} page{pages.length === 1 ? '' : 's'} for this paper. Add more if it's multi-page, or submit
+            when done.
+          </p>
+          <div className="page-thumbs">
+            {pageUrls.map((url, i) => (
+              <div className="page-thumb" key={url}>
+                <img src={url} alt={`Page ${i + 1}`} />
+                <span className="page-thumb-number">{i + 1}</span>
+                <button
+                  type="button"
+                  className="page-thumb-remove"
+                  onClick={() => removePage(i)}
+                  aria-label={`Remove page ${i + 1}`}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
           {error && <p className="error-text">{error}</p>}
           <div className="button-row">
-            <button
-              className="btn-secondary"
-              onClick={() => {
-                setPhoto(null)
-                setError(null)
-                setStep('capture')
-              }}
-            >
-              Retake
+            <button type="button" className="btn-secondary" onClick={() => setStep('capture')}>
+              + Add page
             </button>
-            <button className="btn-primary" onClick={() => void handleSubmit()}>
-              {error ? 'Try again' : 'Use this photo'}
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={pages.length === 0}
+              onClick={() => void handleSubmit()}
+            >
+              Submit paper
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === 'error' && (
+        <>
+          <div className="page-thumbs">
+            {pageUrls.map((url, i) => (
+              <div className="page-thumb" key={url}>
+                <img src={url} alt={`Page ${i + 1}`} />
+                <span className="page-thumb-number">{i + 1}</span>
+              </div>
+            ))}
+          </div>
+          {error && <p className="error-text">{error}</p>}
+          <div className="button-row">
+            <button type="button" className="btn-secondary" onClick={() => setStep('pages')}>
+              Back to pages
+            </button>
+            <button type="button" className="btn-primary" onClick={() => void handleSubmit()}>
+              Try again
             </button>
           </div>
         </>

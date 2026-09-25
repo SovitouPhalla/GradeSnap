@@ -1,10 +1,11 @@
 // Supabase Edge Function: process-submission.
 // Single combined OCR + grading step: one multimodal Gemini request reads the
-// photographed paper, identifies every question on it, and grades each answer
-// using its own subject knowledge — there is no teacher-authored answer key.
+// photographed paper (one or more page images), identifies every question on
+// it, and grades each answer using its own subject knowledge — there is no
+// teacher-authored answer key.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders, handleCors } from '../_shared/cors.ts'
-import { callGemini, type GeminiResult } from '../_shared/gemini.ts'
+import { callGemini, type GeminiImage, type GeminiResult } from '../_shared/gemini.ts'
 import { withRetryOnce } from '../_shared/retry.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -12,7 +13,7 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
 
 interface ProcessRequestBody {
   examId: string
-  imagePath: string
+  imagePaths: string[]
 }
 
 // Spreading a multi-megabyte Uint8Array into String.fromCharCode(...) overflows
@@ -36,28 +37,29 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     })
 
-    const { examId, imagePath } = (await req.json()) as ProcessRequestBody
-    if (!examId || !imagePath) {
-      return new Response(JSON.stringify({ error: 'examId and imagePath are required' }), {
+    const { examId, imagePaths } = (await req.json()) as ProcessRequestBody
+    if (!examId || !imagePaths || imagePaths.length === 0) {
+      return new Response(JSON.stringify({ error: 'examId and at least one imagePath are required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const { data: imageBlob, error: downloadError } = await supabase.storage
-      .from('exam-scans')
-      .download(imagePath)
-    if (downloadError) throw downloadError
-
-    const imageBuffer = new Uint8Array(await imageBlob.arrayBuffer())
-    const base64Image = bytesToBase64(imageBuffer)
-    const mimeType = imageBlob.type || 'image/jpeg'
+    const images: GeminiImage[] = []
+    for (const imagePath of imagePaths) {
+      const { data: imageBlob, error: downloadError } = await supabase.storage
+        .from('exam-scans')
+        .download(imagePath)
+      if (downloadError) throw downloadError
+      const imageBuffer = new Uint8Array(await imageBlob.arrayBuffer())
+      images.push({ base64: bytesToBase64(imageBuffer), mimeType: imageBlob.type || 'image/jpeg' })
+    }
 
     let geminiResult: GeminiResult | null = null
     let status: 'graded' | 'error' = 'graded'
     let geminiErrorMessage: string | null = null
     try {
-      geminiResult = await withRetryOnce(() => callGemini(base64Image, mimeType))
+      geminiResult = await withRetryOnce(() => callGemini(images))
     } catch (geminiError) {
       console.error('Gemini call failed after retry:', geminiError)
       status = 'error'
@@ -65,13 +67,13 @@ Deno.serve(async (req) => {
     }
 
     // Always log the raw model output (or the failure reason) for debugging.
-    console.log('Gemini result for', imagePath, ':', JSON.stringify(geminiResult ?? geminiErrorMessage))
+    console.log('Gemini result for', imagePaths.join(', '), ':', JSON.stringify(geminiResult ?? geminiErrorMessage))
 
     const { data: submission, error: insertError } = await supabase
       .from('submissions')
       .insert({
         exam_id: examId,
-        image_path: imagePath,
+        image_paths: imagePaths,
         student_name: geminiResult?.studentName ?? null,
         raw_ocr_text: geminiResult ? JSON.stringify(geminiResult) : geminiErrorMessage,
         status,

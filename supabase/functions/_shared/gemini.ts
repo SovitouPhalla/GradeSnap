@@ -22,10 +22,10 @@ export interface GeminiResult {
   questions: GeminiQuestionResult[]
 }
 
-const PROMPT = `You are grading a scanned paper exam/worksheet for a teacher. The image shows one student's handwritten or printed paper. No answer key is provided — use your own subject-matter knowledge to judge correctness and assign scores.
+const PROMPT = `You are grading a scanned paper exam/worksheet for a teacher. The image(s) show one student's handwritten or printed paper — if there is more than one image, they are consecutive pages of the SAME paper in order; treat them as one continuous document and number questions continuously across all pages (do not restart numbering on later pages). No answer key is provided — use your own subject-matter knowledge to judge correctness and assign scores.
 
-Step 1: If a student name is visible (usually handwritten at the top), read it. Otherwise return null.
-Step 2: Identify every question on the page, in order. For each one, read the question text as printed/written, and transcribe the student's answer as written.
+Step 1: If a student name is visible (usually handwritten at the top of the first page), read it. Otherwise return null.
+Step 2: Identify every question across all pages, in order. For each one, read the question text as printed/written, and transcribe the student's answer as written.
 Step 3: Decide whether each question is multiple-choice ("mcq", lettered options given) or open-ended ("short_answer").
 Step 4: Decide reasonable max points per question: use the paper's own point notation if visible (e.g. "(2 pts)"); otherwise default to 1 point for simple/factual questions and up to 3-5 for questions that clearly expect a fuller written response.
 Step 5: Grade the transcribed answer. For multiple choice, award full credit only if you can determine the selected option is correct. For open-ended questions with no single correct answer (opinions, creative writing, brainstorming), grade on effort, completeness, and whether the instructions were followed, not on matching one "right" answer.
@@ -64,10 +64,17 @@ const RESPONSE_SCHEMA = {
   required: ['questions'],
 }
 
-export async function callGemini(imageBase64: string, mimeType: string): Promise<GeminiResult> {
+export interface GeminiImage {
+  base64: string
+  mimeType: string
+}
+
+export async function callGemini(images: GeminiImage[]): Promise<GeminiResult> {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not configured')
   }
+
+  const imageParts = images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } }))
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
@@ -77,7 +84,7 @@ export async function callGemini(imageBase64: string, mimeType: string): Promise
       body: JSON.stringify({
         contents: [
           {
-            parts: [{ text: PROMPT }, { inlineData: { mimeType, data: imageBase64 } }],
+            parts: [{ text: PROMPT }, ...imageParts],
           },
         ],
         generationConfig: {

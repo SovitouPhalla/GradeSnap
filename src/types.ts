@@ -13,7 +13,7 @@ export interface Submission {
   id: string
   exam_id: string
   student_name: string | null
-  image_path: string | null
+  image_paths: string[]
   raw_ocr_text: string | null
   status: SubmissionStatus
   created_at: string
